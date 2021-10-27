@@ -3,17 +3,22 @@ const net = require('net');
 
 const readReqLine = 1;
 const readReqArg = 2;
-const MAGIC = 0x00686a6c
+const MAGIC = 0x00686a6c;
+//TODO
+const TYPE_NORMAL = 0;
+const TYPE_STREAM = 1;
+const TYPE_MESSAGE = 2;
+const TYPE_ERROR = 3;
+const TYPE_NORTN = 4;
 
-class Service{
-    constructor(name,impl,methods) {
+class Service {
+    constructor(name, methods) {
         this.name = name;
-        this.impl = impl;
         this.methods = methods;
     }
 }
 
-class Context{
+class Context {
     constructor(conn) {
         this.conn = conn;
         this.state = readReqLine;
@@ -23,16 +28,16 @@ class Context{
     }
 }
 
-class Argument{
-    constructor(typeKind,nameLen,dataLen) {
+class Argument {
+    constructor(typeKind, nameLen, dataLen) {
         this.typeKind = typeKind;
         this.nameLen = nameLen;
         this.dataLen = dataLen;
     }
 }
 
-class Request{
-    constructor(service,method,argCnt,seq) {
+class Request {
+    constructor(service, method, argCnt, seq) {
         this.service = service;
         this.method = method;
         this.argCnt = argCnt;
@@ -42,11 +47,10 @@ class Request{
     }
 }
 
-class Server{
+class Server {
     constructor() {
         this.#services = {};
         this.#tcpServer = net.createServer(sock => {
-            console.log(`get conn at ${sock.remoteAddress}:${sock.remotePort}`);
             let ctx = new Context(sock);
             sock.on("data", chunk => {
                 try {
@@ -56,18 +60,19 @@ class Server{
                     sock.destroy();
                 }
             })
-            sock.on("close", () => {
-                console.log("客户端关闭");
+            sock.on("error", err => {
+                sock.destroy();
+                console.log(err);
             })
         });
     }
-    #readReqLine(ctx){
+    #readReqLine(ctx) {
         let index = ctx.buf.indexOf("\r\n");
         if (index == -1) {
             if (ctx.buf.length >= 4096) throw "request line is too large";
             return;
-        } 
-        let arr = ctx.buf.substr(0,index).split(" ");
+        }
+        let arr = ctx.buf.substr(0, index).split(" ");
         if (arr.length != 4) throw "invalid request line";
         ctx.request = new Request(arr[0], arr[1], parseInt(arr[2]), parseInt(arr[3]));
         ctx.state = readReqArg;
@@ -77,7 +82,7 @@ class Server{
         while (1) {
             if (ctx.curArg == null) {
                 if (ctx.buf.length < 8) return;
-                let head = Buffer.from(ctx.buf.substr(0,8));
+                let head = Buffer.from(ctx.buf.substr(0, 8));
                 let typeKind = head.readUInt16LE();
                 let nameLen = head.slice(2).readUInt16LE();
                 let dataLen = head.slice(4).readUInt32LE();
@@ -86,10 +91,10 @@ class Server{
             }
             let arg = ctx.curArg;
             if (ctx.buf.length < arg.nameLen + arg.dataLen) return;
-            
-            arg.name = ctx.buf.substr(0,arg.nameLen);
-            arg.data = ctx.buf.substr(arg.nameLen, arg.nameLen + arg.dataLen);
-            ctx.buf = ctx.buf.substr(arg.nameLen+arg.dataLen);
+
+            arg.name = ctx.buf.substr(0, arg.nameLen);
+            arg.data = ctx.buf.substr(arg.nameLen, arg.dataLen);
+            ctx.buf = ctx.buf.substr(arg.nameLen + arg.dataLen);
             ctx.request.args.push(arg);
             ctx.curArg = null;
             if (ctx.request.args.length == ctx.request.argCnt) {
@@ -98,12 +103,22 @@ class Server{
             }
         }
     }
-    //TODO
-    #handleRequest(req) {
-        console.log(`[${req.service}.${req.method}]`);
-        req.args.forEach(arg => {
-            console.log(`   ${arg.name} ${arg.data}`);
-        });
+    #handleRequest(ctx) {
+        let req = ctx.request;
+        let service = this.#services[req.service];
+        if (service == undefined) throw "invalid service";
+        let method = service.methods[req.method];
+        if (method == undefined) throw "invalid method";
+        let resp = method(req.args);
+        let head = Buffer.alloc(16);
+        //node version >= v12.0.0
+        head.writeBigUInt64LE(BigInt(req.seq), 0);
+        head.writeUInt16LE(resp.typeKind, 8);
+        head.writeUInt16LE(resp.nameLen, 10);
+        head.writeUInt32LE(resp.dataLen, 12);
+        ctx.conn.write(head);
+        ctx.conn.write(resp.name);
+        ctx.conn.write(resp.data);
     }
     #handleChunk(ctx, chunk) {
         ctx.buf += chunk.toString();
@@ -122,7 +137,7 @@ class Server{
                 case readReqArg:
                     this.#readReqArgs(ctx);
                     if (ctx.state == readReqArg) return;
-                    this.#handleRequest(ctx.request);
+                    this.#handleRequest(ctx);
             }
         }
     }
@@ -132,6 +147,7 @@ class Server{
         this.#services[service.name] = service;
     }
     listen(port, host, cb) {
+
         this.#tcpServer.listen(port, host, cb);
     }
 }
