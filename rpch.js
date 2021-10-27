@@ -1,5 +1,4 @@
 'use strict';
-const { request } = require('http');
 const net = require('net');
 
 const readReqLine = 1;
