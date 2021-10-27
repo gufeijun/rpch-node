@@ -4,19 +4,6 @@ const net = require('net');
 const readReqLine = 1;
 const readReqArg = 2;
 const MAGIC = 0x00686a6c;
-//TODO
-const TYPE_NORMAL = 0;
-const TYPE_STREAM = 1;
-const TYPE_MESSAGE = 2;
-const TYPE_ERROR = 3;
-const TYPE_NORTN = 4;
-
-class Service {
-    constructor(name, methods) {
-        this.name = name;
-        this.methods = methods;
-    }
-}
 
 class Context {
     constructor(conn) {
