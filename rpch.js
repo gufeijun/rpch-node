@@ -83,6 +83,10 @@ class Server {
     }
     #readReqArgs(ctx) {
         while (1) {
+            if (ctx.request.args.length == ctx.request.argCnt) {
+                ctx.state = readReqLine;
+                return;
+            }
             if (ctx.curArg == null) {
                 if (ctx.buf.length < 8) return;
                 let head = Buffer.from(ctx.buf.substr(0, 8));
@@ -100,10 +104,6 @@ class Server {
             ctx.buf = ctx.buf.substr(arg.nameLen + arg.dataLen);
             ctx.request.args.push(arg);
             ctx.curArg = null;
-            if (ctx.request.args.length == ctx.request.argCnt) {
-                ctx.state = readReqLine;
-                return;
-            }
         }
     }
     async #handleRequest(ctx) {
