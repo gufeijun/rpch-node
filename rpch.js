@@ -1,9 +1,16 @@
 'use strict';
 const net = require('net');
+const { setUncaughtExceptionCaptureCallback } = require('process');
 
 const readReqLine = 1;
 const readReqArg = 2;
 const MAGIC = 0x00686a6c;
+
+class NonSeriousErr extends Error{
+    constructor(msg) {
+        super(msg);
+    }
+}
 
 class Context {
     constructor(conn) {
@@ -32,6 +39,18 @@ class Request {
         this.args = [];
         this.curArg = null;
     }
+}
+
+function sendResponse(conn,seq,typeKind,name,data) {
+    let head = Buffer.alloc(16);
+    //node version >= v12.0.0
+    head.writeBigUInt64LE(BigInt(seq), 0);
+    head.writeUInt16LE(typeKind, 8);
+    head.writeUInt16LE(name.length, 10);
+    head.writeUInt32LE(data.length, 12);
+    conn.write(head);
+    conn.write(name);
+    conn.write(data);
 }
 
 class Server {
@@ -90,22 +109,24 @@ class Server {
             }
         }
     }
-    #handleRequest(ctx) {
+    async #handleRequest(ctx) {
         let req = ctx.request;
         let service = this.#services[req.service];
         if (service == undefined) throw "invalid service";
         let method = service.methods[req.method];
         if (method == undefined) throw "invalid method";
-        let resp = method(req.args);
-        let head = Buffer.alloc(16);
-        //node version >= v12.0.0
-        head.writeBigUInt64LE(BigInt(req.seq), 0);
-        head.writeUInt16LE(resp.typeKind, 8);
-        head.writeUInt16LE(resp.nameLen, 10);
-        head.writeUInt32LE(resp.dataLen, 12);
-        ctx.conn.write(head);
-        ctx.conn.write(resp.name);
-        ctx.conn.write(resp.data);
+        try {
+            let resp = await method(req.args);
+            sendResponse(ctx.conn, req.seq, resp.typeKind, resp.name, resp.data);
+        } catch (e) {
+            //仅当用户抛出NonSeriousErr时我们将此错误当做消息返回给客户端
+            //当抛出其他错误时，我们关闭客户端的链接
+            if (e instanceof NonSeriousErr) {
+                sendResponse(ctx.conn, req.seq, 3, "", e.message);
+            } else {
+                ctx.conn.destroy();
+            }
+        }
     }
     #handleChunk(ctx, chunk) {
         ctx.buf += chunk.toString();
@@ -134,7 +155,6 @@ class Server {
         this.#services[service.name] = service;
     }
     listen(port, host, cb) {
-
         this.#tcpServer.listen(port, host, cb);
     }
 }
@@ -142,5 +162,8 @@ class Server {
 module.exports = {
     createServer: () => {
         return new Server();
+    },
+    NonSeriousErr: (msg) => {
+        return new NonSeriousErr(msg);
     }
 }

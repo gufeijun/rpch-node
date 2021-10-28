@@ -3,9 +3,6 @@
   "version": "1.0.0",
   "description": "rpch-node",
   "main": "rpch.js",
-  "scripts": {
-    "test": "node ./main.js"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gufeijun/rpch-node.git"
