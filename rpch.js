@@ -1,6 +1,5 @@
 'use strict';
 const net = require('net');
-const { setUncaughtExceptionCaptureCallback } = require('process');
 
 const readReqLine = 1;
 const readReqArg = 2;
@@ -59,12 +58,10 @@ class Server {
         this.#tcpServer = net.createServer(sock => {
             let ctx = new Context(sock);
             sock.on("data", chunk => {
-                try {
-                    this.#handleChunk(ctx, chunk);
-                } catch (e) {
+                this.#handleChunk(ctx, chunk).catch(e => {
                     console.log(e);
-                    sock.destroy();
-                }
+                    ctx.conn.destroy();
+                });
             })
             sock.on("error", err => {
                 sock.destroy();
@@ -124,11 +121,11 @@ class Server {
             if (e instanceof NonSeriousErr) {
                 sendResponse(ctx.conn, req.seq, 3, "", e.message);
             } else {
-                ctx.conn.destroy();
+                throw e;
             }
         }
     }
-    #handleChunk(ctx, chunk) {
+    async #handleChunk(ctx, chunk) {
         ctx.buf += chunk.toString();
         if (ctx.buf.length < 4) return;
         if (!ctx.readMagic) {
@@ -145,7 +142,7 @@ class Server {
                 case readReqArg:
                     this.#readReqArgs(ctx);
                     if (ctx.state == readReqArg) return;
-                    this.#handleRequest(ctx);
+                    await this.#handleRequest(ctx);
             }
         }
     }
