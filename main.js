@@ -13,7 +13,6 @@ class MathService {
 
 class Math extends MathService{
     async Add(a, b) {
-        throw new NonSeriousErr("good");
         return a + b;
     }
 }
