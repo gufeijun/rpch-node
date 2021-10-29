@@ -229,7 +229,7 @@ class Client {
             if (cb == undefined) return;
             delete this.tasks[resp.seq];
             //error return
-            if (resp.typeKind == 3) cb(resp, new Error(resp.data));
+            if (resp.typeKind == 3) cb(resp, new NonSeriousErr(resp.data.toString()));
             else cb(resp,null);
         }
     }
@@ -283,4 +283,7 @@ module.exports = {
     NonSeriousErr: (msg) => {
         return new NonSeriousErr(msg);
     },
+    isNonSeriousErr: (e) => {
+        return e instanceof NonSeriousErr;
+    }
 }
