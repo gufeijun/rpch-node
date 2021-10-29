@@ -1,0 +1,10 @@
+service string{
+    //转大写
+    string toupper(string)
+    //转小写
+    string tolower(string)
+    //字符串拼接
+    string concat(string,string)
+    //字符串转数字
+    int32 atoi(string)
+}
