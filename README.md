@@ -1,6 +1,6 @@
 # 介绍
 
-rpch-node是rpch框架的node实现，更多详细信息可参考[rpch-go](https://github.com/gufeijun/rpch-go)。
+rpch-node是跨语言rpch框架的node实现，更多详细信息可参考[rpch-go](https://github.com/gufeijun/rpch-go)。
 
 使用async以及await，服务端接口方法以及客户端调用支持全异步。
 
@@ -114,3 +114,9 @@ npm i rpch
 或者
 
 直接下载本仓库的rpch.js文件，项目中引入即可。
+
+# references
+
++ [rpch-c](https://github.com/gufeijun/rpch-c)：rpch框架的c语言实现。
++ [rpch-go](https://github.com/gufeijun/rpch-go)：rpch框架的go语言实现。
++ [rpch-node](https://github.com/gufeijun/rpch-node)：rpch框架的nodejs实现。
