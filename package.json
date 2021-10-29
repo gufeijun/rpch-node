@@ -3,6 +3,12 @@
   "version": "1.0.0",
   "description": "rpch-node",
   "main": "rpch.js",
+  "directories": {
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gufeijun/rpch-node.git"
