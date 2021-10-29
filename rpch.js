@@ -11,11 +11,48 @@ class NonSeriousErr extends Error {
     }
 }
 
+class buffer{
+    constructor(size) {
+        //已缓存数据的起始
+        this.front = 0;
+        //已缓存数据的末尾
+        this.rear = 0;
+        this.buf = Buffer.allocUnsafe(size);
+    }
+    drop(size) {
+        this.front += size;
+    }
+    buffered() {
+        return this.rear - this.front;
+    }
+    slice(start, end) {
+        if (!end) end = this.buffered();
+        return this.buf.slice(this.front + start, this.front + end);
+    }
+    fill(chunk) {
+        //当空余空间(不包含0~front) >= chunk size
+        if (this.buf.length - this.rear >= chunk.length) {
+            chunk.copy(this.buf,this.rear,0,chunk.length);
+        }
+        //当空余空间(包含0~front) >= chunk size
+        else if (this.buf.length + this.front - this.rear >= chunk.length) {
+            this.buf.copy(this.buf, 0, this.front, this.rear);
+            this.rear -= this.front;
+            this.front = 0;
+            chunk.copy(this.buf,this.rear,0,chunk.length);
+        } else {
+            this.buf = Buffer.concat([this.buf.slice(this.front, this.rear), chunk]);
+            this.rear -= this.front;
+        }
+        this.rear += chunk.length;
+    }
+}
+
 class Context {
     constructor(conn) {
         this.conn = conn;
         this.state = readReqLine;
-        this.buf = '';
+        this.buf = new buffer(8192);
         this.Request = null;
         this.readMagic = false;
     }
@@ -70,17 +107,18 @@ class Server {
         });
     }
     #readReqLine(ctx) {
-        let index = ctx.buf.indexOf('\r\n');
+        let buffered = ctx.buf.slice(0);
+        let index = buffered.indexOf('\r\n');
         if (index == -1) {
-            if (ctx.buf.length >= 4096) throw 'request line is too large';
+            if (ctx.buf.buffered() >= 4096) throw 'request line is too large';
             return;
         }
-        let arr = ctx.buf.substr(0, index).split(' ');
+        let arr = buffered.slice(0, index).toString().split(' ');
         if (arr.length != 4) throw 'invalid request line';
         ctx.request =
             new Request(arr[0], arr[1], parseInt(arr[2]), parseInt(arr[3]));
         ctx.state = readReqArg;
-        ctx.buf = ctx.buf.substr(index + 2);
+        ctx.buf.drop(index + 2);
     }
     #readReqArgs(ctx) {
         while (1) {
@@ -89,20 +127,20 @@ class Server {
                 return;
             }
             if (ctx.curArg == null) {
-                if (ctx.buf.length < 8) return;
-                let head = Buffer.from(ctx.buf.substr(0, 8));
+                if (ctx.buf.buffered() < 8) return;
+                let head = ctx.buf.slice(0, 8);
                 let typeKind = head.readUInt16LE();
                 let nameLen = head.slice(2).readUInt16LE();
                 let dataLen = head.slice(4).readUInt32LE();
                 ctx.curArg = new Argument(typeKind, nameLen, dataLen);
-                ctx.buf = ctx.buf.substr(8);
+                ctx.buf.drop(8);
             }
             let arg = ctx.curArg;
-            if (ctx.buf.length < arg.nameLen + arg.dataLen) return;
+            if (ctx.buf.buffered() < arg.nameLen + arg.dataLen) return;
 
-            arg.name = ctx.buf.substr(0, arg.nameLen);
-            arg.data = ctx.buf.substr(arg.nameLen, arg.dataLen);
-            ctx.buf = ctx.buf.substr(arg.nameLen + arg.dataLen);
+            arg.name = ctx.buf.slice(0,arg.nameLen).toString();
+            arg.data = ctx.buf.slice(arg.nameLen, arg.nameLen+arg.dataLen);
+            ctx.buf.drop(arg.nameLen+arg.dataLen);
             ctx.request.args.push(arg);
             ctx.curArg = null;
         }
@@ -128,13 +166,12 @@ class Server {
         }
     }
     async #handleChunk(ctx, chunk) {
-        ctx.buf += chunk.toString();
-        if (ctx.buf.length < 4) return;
+        ctx.buf.fill(chunk);
+        if (ctx.buf.buffered() < 4) return;
         if (!ctx.readMagic) {
-            let magicBuf = Buffer.from(ctx.buf.substr(0, 4));
-            if (magicBuf.readUInt32LE() != MAGIC) throw 'invalid magic number';
-            ctx.buf = ctx.buf.substr(4);
+            if (ctx.buf.slice(0,4).readUInt32LE() != MAGIC) throw 'invalid magic number';
             ctx.readMagic = true;
+            ctx.buf.drop(4);
         }
         while (1) {
             switch (ctx.state) {
@@ -163,32 +200,30 @@ class Client {
         this.conn = conn;
         this.seq = 0;
         this.tasks = {};
-        // pending task seq
-        this.msg = "";
+        this.buf = new buffer(8192);
         this.curResp = null;
         conn.on("data", chunk => {
-            this.msg += chunk;
+            this.buf.fill(chunk);
             this.#readResponse();
         });
     }
     #readResponse() {
         while (1) {
             if (this.curResp == null) {
-                if (this.msg.length < 16) return;
-                let buff = Buffer.from(this.msg.substr(0, 16));
+                if (this.buf.buffered() < 16) return;
                 this.curResp = {
-                    seq: Number(buff.readBigUInt64LE()),
-                    typeKind: buff.slice(8, 10).readUInt16LE(),
-                    nameLen: buff.slice(10, 12).readUInt16LE(),
-                    dataLen: buff.slice(12, 16).readUInt32LE(),
+                    seq: Number(this.buf.slice(0,8).readBigUInt64LE()),
+                    typeKind: this.buf.slice(8,10).readUInt16LE(),
+                    nameLen: this.buf.slice(10, 12).readUInt16LE(),
+                    dataLen: this.buf.slice(12, 16).readUInt32LE(),
                 }
-                this.msg = this.msg.substr(16);
+                this.buf.drop(16);
             }
             let resp = this.curResp;
-            if (this.msg.length < resp.nameLen + resp.dataLen) return;
-            resp.name = this.msg.substr(0, resp.nameLen);
-            resp.data = this.msg.substr(resp.nameLen, resp.dataLen);
-            this.msg = this.msg.substr(resp.nameLen + resp.dataLen);
+            if (this.buf.buffered() < resp.nameLen + resp.dataLen) return;
+            resp.name = this.buf.slice(0, resp.nameLen).toString();
+            resp.data = this.buf.slice(resp.nameLen, resp.nameLen+resp.dataLen);
+            this.buf.drop(resp.nameLen + resp.dataLen);
             this.curResp = null;
             let cb = this.tasks[resp.seq];
             if (cb == undefined) return;
